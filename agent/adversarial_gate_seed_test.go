@@ -26,6 +26,8 @@ func TestPromptSeedsCarryAdversarialGate(t *testing.T) {
 	for _, marker := range []string{
 		"argue the opposite case",
 		"cites the specific requests, responses, or controls",
+		"SecWagon-Retest/1.0",
+		"SecWagon-Retest-Changed-Context/1.0",
 	} {
 		if !strings.Contains(RetesterDefaultPrompt, marker) {
 			t.Errorf("retester prompt missing adversarial marker %q", marker)

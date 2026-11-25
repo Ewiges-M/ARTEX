@@ -63,7 +63,7 @@ func ProfileFromEnv() Profile {
 		if name != "" && name != "off" {
 			log.Printf("[egress] ARTEX_NOISE_PROFILE=%q is not off, quiet, balanced or aggressive; using off", name)
 		}
-		return Profile{Name: "off"}
+		p = Profile{Name: "off"}
 	}
 	if ua := strings.TrimSpace(os.Getenv("ARTEX_TARGET_USER_AGENT")); strings.ContainsFunc(ua, unicode.IsControl) {
 		log.Printf("[egress] ARTEX_TARGET_USER_AGENT contains a control character; ignored")
@@ -333,9 +333,37 @@ func (g *Governor) Transport(namespace string, base http.RoundTripper) http.Roun
 		base = http.DefaultTransport
 	}
 	if g.off() {
+		if g.p.UserAgent != "" {
+			return &userAgentTransport{base: base, userAgent: g.p.UserAgent}
+		}
 		return base
 	}
 	return &transport{g, namespace, base}
+}
+
+// userAgentTransport applies the SecWagon target identity without enabling
+// rate limits or response caching when the noise profile is off.
+type userAgentTransport struct {
+	base      http.RoundTripper
+	userAgent string
+}
+
+func targetUserAgentRequest(req *http.Request, fallback string) *http.Request {
+	current := req.Header.Get("User-Agent")
+	if current != "" && !strings.HasPrefix(strings.ToLower(current), "artex-") && !strings.HasPrefix(strings.ToLower(current), "artex/") {
+		return req
+	}
+	req = req.Clone(req.Context())
+	if current == "" {
+		req.Header.Set("User-Agent", fallback)
+	} else {
+		req.Header.Set("User-Agent", "SecWagon"+current[len("ARTEX"):])
+	}
+	return req
+}
+
+func (t *userAgentTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	return t.base.RoundTrip(targetUserAgentRequest(req, t.userAgent))
 }
 
 type transport struct {
@@ -347,9 +375,8 @@ type transport struct {
 const maxSharedBody = 2 << 20 // a larger response is neither coalesced nor cached
 
 func (t *transport) RoundTrip(req *http.Request) (*http.Response, error) {
-	if ua := t.g.p.UserAgent; ua != "" && req.Header.Get("User-Agent") == "" {
-		req = req.Clone(req.Context())
-		req.Header.Set("User-Agent", ua)
+	if ua := t.g.p.UserAgent; ua != "" {
+		req = targetUserAgentRequest(req, ua)
 	}
 	task := taskKey(req.Context())
 	if task == "" || req.Method != http.MethodGet || (req.Body != nil && req.Body != http.NoBody) {

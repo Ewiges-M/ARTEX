@@ -255,8 +255,32 @@ func TestUserAgentAndEnv(t *testing.T) {
 	if ua := got.Load().(string); ua != "engagement-ua" {
 		t.Fatalf("set: User-Agent = %q", ua)
 	}
+	off := New(Profile{Name: "off", UserAgent: "SecWagon-WebPentest/1.0"})
+	do(t, off, context.Background(), "GET", s.URL)
+	if ua := got.Load().(string); ua != "SecWagon-WebPentest/1.0" {
+		t.Fatalf("off-profile User-Agent = %q", ua)
+	}
+	for sent, want := range map[string]string{
+		"ARTEX-Retest-Changed-Context/1.0": "SecWagon-Retest-Changed-Context/1.0",
+		"Custom-Test-Agent/1.0":            "Custom-Test-Agent/1.0",
+	} {
+		req, _ := http.NewRequest(http.MethodGet, s.URL, nil)
+		req.Header.Set("User-Agent", sent)
+		resp, err := (&http.Client{Transport: off.Transport("test", nil)}).Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		if ua := got.Load().(string); ua != want {
+			t.Fatalf("sent %q: User-Agent = %q, want %q", sent, ua, want)
+		}
+	}
 	if p := ProfileFromEnv(); p.RPS != 0 || p.Name != "off" {
 		t.Fatalf("default profile: %+v, want off", p)
+	}
+	t.Setenv("ARTEX_TARGET_USER_AGENT", "SecWagon-WebPentest/1.0")
+	if p := ProfileFromEnv(); p.Name != "off" || p.UserAgent != "SecWagon-WebPentest/1.0" {
+		t.Fatalf("off profile should retain target User-Agent: %+v", p)
 	}
 	t.Setenv("ARTEX_NOISE_PROFILE", "Balanced")
 	t.Setenv("ARTEX_TARGET_USER_AGENT", "x/1")
